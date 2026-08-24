@@ -1,0 +1,7 @@
+interface:
+  display_name: "Flightdeck"
+  short_description: "Traceable autonomous delivery with safe gates"
+  default_prompt: "Use $flightdeck to turn this brief into a verified, resumable delivery run."
+
+policy:
+  allow_implicit_invocation: true

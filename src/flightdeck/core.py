@@ -29,6 +29,7 @@ def _copy_state(state):
     result["gates"] = dict(state.get("gates", {}))
     result["approvals"] = list(state.get("approvals", []))
     result["requirements"] = [dict(item) for item in state.get("requirements", [])]
+    result["assumptions"] = list(state.get("assumptions", []))
     return result
 
 
@@ -91,5 +92,12 @@ def next_actions(state, event):
         if approval not in updated["approvals"]:
             raise GateBlocked("manual mode requires approval: %s" % next_phase)
         updated["approvals"].remove(approval)
+    pending_mode = updated.pop("pending_mode", None)
+    if pending_mode is not None:
+        if pending_mode not in MODES:
+            raise TransitionError("unknown pending mode: %r" % pending_mode)
+        updated["mode"] = pending_mode
+        if pending_mode == "full":
+            updated["assumptions"].append("Mode changed to full at phase %s" % next_phase)
     updated["phase"] = next_phase
     return TransitionResult(updated, ("create_%s" % next_phase,))

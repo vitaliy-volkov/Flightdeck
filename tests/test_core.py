@@ -71,6 +71,26 @@ class CoreTransitionsTest(unittest.TestCase):
         with self.assertRaises(GateBlocked):
             next_actions(performed.state, {"type": "request_action", "action": "publish"})
 
+    def test_pending_mode_takes_effect_only_on_next_phase(self):
+        state = {
+            "phase": "preflight",
+            "mode": "semi",
+            "pending_mode": "full",
+            "gates": {},
+            "assumptions": [],
+        }
+        self.assertEqual("semi", state["mode"])
+
+        result = next_actions(
+            state,
+            {"type": "gate_passed", "phase": "preflight", "evidence": {"validator": "preflight", "ok": True}},
+        )
+
+        self.assertEqual("manifest", result.state["phase"])
+        self.assertEqual("full", result.state["mode"])
+        self.assertNotIn("pending_mode", result.state)
+        self.assertIn("Mode changed to full at phase manifest", result.state["assumptions"])
+
 
 if __name__ == "__main__":
     unittest.main()

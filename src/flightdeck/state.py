@@ -84,6 +84,8 @@ class StateStore:
             raise StateError("unknown phase: %r" % self.data["phase"])
         if self.data["mode"] not in MODES:
             raise StateError("unknown mode: %r" % self.data["mode"])
+        if self.data.get("pending_mode") is not None and self.data["pending_mode"] not in MODES:
+            raise StateError("unknown pending mode: %r" % self.data["pending_mode"])
         if self.data["depth"] not in DEPTHS:
             raise StateError("unknown depth: %r" % self.data["depth"])
         return True
@@ -98,6 +100,11 @@ class StateStore:
             self.data.setdefault("assumptions", []).append(event["text"])
         elif event["type"] == "scope_deferred":
             self.data.setdefault("deferred", []).append(event["requirement_id"])
+        elif event["type"] == "mode_change_requested":
+            mode = event.get("mode")
+            if mode not in MODES:
+                raise StateError("unknown mode: %r" % mode)
+            self.data["pending_mode"] = mode
         return self
 
     def save(self, path):

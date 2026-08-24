@@ -27,6 +27,7 @@ def _summary(store):
         "phase": phase,
         "next_phase": next_phase,
         "mode": data["mode"],
+        "pending_mode": data.get("pending_mode"),
         "assumptions": data.get("assumptions", []),
         "deferred": data.get("deferred", []),
     }
@@ -44,6 +45,8 @@ def _parser():
     commands.add_parser("resume")
     commands.add_parser("status")
     commands.add_parser("validate")
+    mode = commands.add_parser("mode")
+    mode.add_argument("--set", dest="requested_mode", choices=("full", "semi", "interview", "manual"), required=True)
     export = commands.add_parser("export")
     export.add_argument("--output")
     return parser
@@ -73,6 +76,15 @@ def main(argv=None):
     elif arguments.command == "validate":
         store.validate()
         _emit({"status": "valid", "path": str(path), "schema_version": store.data["schema_version"]})
+    elif arguments.command == "mode":
+        store.apply({"type": "mode_change_requested", "mode": arguments.requested_mode})
+        if not arguments.dry_run:
+            store.save(path)
+        _emit({
+            "status": "dry-run" if arguments.dry_run else "scheduled",
+            "mode": store.data["mode"],
+            "pending_mode": store.data["pending_mode"],
+        })
     elif arguments.command == "export":
         content = json.dumps(store.data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         if arguments.output:
@@ -84,4 +96,3 @@ def main(argv=None):
         else:
             print(content, end="")
     return 0
-

@@ -53,6 +53,21 @@ class CliTest(unittest.TestCase):
             self.assertIn(str(state_path), result.stderr)
             self.assertEqual(before, state_path.read_bytes())
 
+    def test_mode_change_is_persisted_for_the_next_phase(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self.assertEqual(0, self.run_cli(project, "init", "--mode", "semi").returncode)
+
+            changed = self.run_cli(project, "mode", "--set", "full")
+            self.assertEqual(0, changed.returncode, changed.stderr)
+            output = json.loads(changed.stdout)
+            self.assertEqual("semi", output["mode"])
+            self.assertEqual("full", output["pending_mode"])
+
+            status = json.loads(self.run_cli(project, "status").stdout)
+            self.assertEqual("semi", status["mode"])
+            self.assertEqual("full", status["pending_mode"])
+
 
 if __name__ == "__main__":
     unittest.main()
