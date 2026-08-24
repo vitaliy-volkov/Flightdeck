@@ -1,0 +1,9 @@
+{
+  "name": "safe-report",
+  "version": "1.0.0",
+  "api_version": "1.0",
+  "entrypoint": "plugin.py",
+  "hooks": ["report_section"],
+  "agents": ["codex", "claude-code", "cursor"],
+  "capabilities": []
+}

@@ -5,8 +5,14 @@ import sys
 from pathlib import Path
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPOSITORY_ROOT / "src"))
+SCRIPT = Path(__file__).resolve()
+SOURCE_ROOTS = (SCRIPT.parents[3] / "src", SCRIPT.parents[1] / "src")
+for source_root in SOURCE_ROOTS:
+    if (source_root / "flightdeck").is_dir():
+        sys.path.insert(0, str(source_root))
+        break
+else:
+    raise SystemExit("Flightdeck runtime not found; install src/ beside the skill or run from a checkout")
 
 from flightdeck.cli import main  # noqa: E402
 

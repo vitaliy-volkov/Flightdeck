@@ -12,6 +12,8 @@ python3 skills/flightdeck/scripts/flightdeck.py --project . status
 python3 skills/flightdeck/scripts/flightdeck.py --project . validate
 ```
 
+Для проверки локального checkout без установки используйте команды выше прямо из корня репозитория; entrypoint сам подключает `src/`. Канонический порядок фаз: `preflight → manifest → briefing → spec → plan → build → review → acceptance`. Быстрая проверка checkout: `python3 scripts/quick_validate.py`.
+
 Для продолжения существующего запуска используйте `resume`. Режимы: `full`, `semi`, `interview`, `manual`; команда `python3 skills/flightdeck/scripts/flightdeck.py --project . mode --set full` планирует смену режима со следующей фазы. `full` записывает автоматические решения как assumptions, но не разрешает push, deploy, публикацию и другие внешние или необратимые действия — для них всегда нужно отдельное подтверждение пользователя.
 
 ## Quick start (EN)
@@ -23,6 +25,8 @@ python3 skills/flightdeck/scripts/flightdeck.py --project . init --mode semi --d
 python3 skills/flightdeck/scripts/flightdeck.py --project . status
 python3 skills/flightdeck/scripts/flightdeck.py --project . validate
 ```
+
+For an uninstalled local checkout, run those commands directly from the repository root; the entrypoint adds `src/` itself. The canonical phase order is `preflight → manifest → briefing → spec → plan → build → review → acceptance`. Validate a checkout with `python3 scripts/quick_validate.py`.
 
 Use `resume` for an existing run. Modes are `full`, `semi`, `interview`, and `manual`; `python3 skills/flightdeck/scripts/flightdeck.py --project . mode --set full` schedules a mode change for the next phase. Full mode records automatic decisions as assumptions, but never authorizes push, deployment, publication, or another external or irreversible action. Those always require separate user approval.
 

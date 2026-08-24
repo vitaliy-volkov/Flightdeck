@@ -1,13 +1,17 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from flightdeck.plugins import PluginError, PluginManager, resolve, validate
+from flightdeck.cli import main as cli_main
 
 
 def make_plugin(root: Path, name="demo", version="1.0.0", body=None):
@@ -25,6 +29,30 @@ print(json.dumps({"ok": True, "output": request["granted_capabilities"], "events
 
 
 class PluginContractTests(unittest.TestCase):
+    def test_doctor_rejects_unsupported_python_through_report_and_cli(self):
+        if sys.version_info >= (3, 11):
+            self.skipTest("this interpreter is supported; the environment-aware test covers it")
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td) / "project"
+            self.assertEqual(0, cli_main(["--project", str(project), "init"]))
+            report = PluginManager(project, agent="codex").doctor()
+            exit_code = cli_main(["--project", str(project), "doctor"])
+            python_check = next(item for item in report["checks"] if item["check"] == "python")
+            self.assertFalse(python_check["ok"])
+            self.assertFalse(report["ok"])
+            self.assertEqual(2, exit_code)
+
+    def test_doctor_is_healthy_immediately_after_documented_example_install(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(__file__).parents[1]
+            manager = PluginManager(Path(td) / "project", agent="codex")
+            manager.install(str(root / "examples" / "safe-plugin"))
+            report = manager.doctor()
+            runtime_supported = sys.version_info >= (3, 11)
+            self.assertEqual(runtime_supported, report["ok"], report)
+            self.assertEqual(runtime_supported, next(item for item in report["checks"] if item["check"] == "python")["ok"])
+            self.assertTrue(next(item for item in report["checks"] if item["check"] == "plugin:safe-report")["ok"])
+
     def test_manifest_rejects_incompatible_api_before_run(self):
         with self.assertRaisesRegex(PluginError, "api_version"):
             validate({"name": "x", "version": "1.0.0", "api_version": "2.0", "entrypoint": "x.py", "hooks": [], "agents": ["codex"], "capabilities": []})
@@ -130,6 +158,43 @@ print(json.dumps({"ok": True, "output": None, "events": [], "error": None}))
                 with self.assertRaisesRegex(PluginError, "denied"):
                     manager.dispatch("demo", "before_phase", {})
 
+    def test_files_read_does_not_allow_os_open_write(self):
+        body = """import json,os,sys
+json.loads(sys.stdin.readline())
+fd=os.open('escaped.txt', os.O_WRONLY|os.O_CREAT)
+os.close(fd)
+print(json.dumps({'ok':True,'output':None,'events':[],'error':None}))
+"""
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td); source = base / "source"; make_plugin(source, body=body)
+            manifest = json.loads((source / "flightdeck.plugin.json").read_text()); manifest["capabilities"] = ["files.read"]
+            (source / "flightdeck.plugin.json").write_text(json.dumps(manifest))
+            manager = PluginManager(base / "project", agent="codex"); manager.install(str(source)); manager.grant("demo", ["files.read"])
+            with self.assertRaisesRegex(PluginError, "denied"):
+                manager.dispatch("demo", "before_phase", {}, requested_capabilities=["files.read"])
+
+    def test_unbrokered_high_risk_capabilities_fail_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td); source = base / "source"; make_plugin(source)
+            manifest = json.loads((source / "flightdeck.plugin.json").read_text())
+            manifest["capabilities"] = ["shell", "network", "files.write"]
+            (source / "flightdeck.plugin.json").write_text(json.dumps(manifest))
+            manager = PluginManager(base / "project", agent="codex"); manager.install(str(source))
+            manager.grant("demo", manifest["capabilities"])
+            for capability in manifest["capabilities"]:
+                with self.subTest(capability=capability), self.assertRaisesRegex(PluginError, "broker"):
+                    manager.dispatch("demo", "before_phase", {}, requested_capabilities=[capability])
+
+    def test_parent_secrets_are_not_forwarded_to_plugin(self):
+        body = """import json,os,sys
+json.loads(sys.stdin.readline())
+print(json.dumps({'ok':True,'output':os.environ.get('FLIGHTDECK_TEST_SECRET'),'events':[],'error':None}))
+"""
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {"FLIGHTDECK_TEST_SECRET": "do-not-leak"}):
+            base = Path(td); source = base / "source"; make_plugin(source, body=body)
+            manager = PluginManager(base / "project", agent="codex"); manager.install(str(source))
+            self.assertIsNone(manager.dispatch("demo", "before_phase", {})["output"])
+
     def test_external_write_approval_is_user_only_and_single_use(self):
         body = """import json,sys
 json.loads(sys.stdin.readline())
@@ -203,6 +268,24 @@ print(json.dumps({"ok":True,"output":None,"events":[{"type":request["payload"]["
                     manager.dispatch("demo", "before_phase", {"event": event_name}, approval=approval)
                     with self.assertRaisesRegex(PluginError, "approval"):
                         manager.dispatch("demo", "before_phase", {"event": event_name}, approval=approval)
+
+    def test_concurrent_dispatch_consumes_approval_once(self):
+        body = """import json,sys,time
+json.loads(sys.stdin.readline()); time.sleep(.1)
+print(json.dumps({"ok":True,"output":None,"events":[{"type":"publish"}],"error":None}))
+"""
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td); source = base / "source"; make_plugin(source, body=body)
+            manager = PluginManager(base / "project", agent="codex"); manager.install(str(source))
+            approval = {"id":"race-1","actor":"user","action":"plugin:demo:before_phase"}
+            def call():
+                try:
+                    manager.dispatch("demo", "before_phase", {}, approval=approval)
+                    return "ok"
+                except PluginError:
+                    return "blocked"
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                self.assertEqual(["blocked", "ok"], sorted(pool.map(lambda _: call(), range(2))))
 
 
 if __name__ == "__main__":

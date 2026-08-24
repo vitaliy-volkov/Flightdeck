@@ -93,6 +93,8 @@ class StateStore:
     def apply(self, event):
         if not isinstance(event, dict) or not event.get("type"):
             raise StateError("event must be an object with type")
+        if event["type"] == "mode_change_requested" and event.get("mode") not in MODES:
+            raise StateError("unknown mode: %r" % event.get("mode"))
         recorded = dict(event)
         recorded.setdefault("at", datetime.now(timezone.utc).isoformat())
         self.data["events"].append(recorded)
@@ -101,10 +103,7 @@ class StateStore:
         elif event["type"] == "scope_deferred":
             self.data.setdefault("deferred", []).append(event["requirement_id"])
         elif event["type"] == "mode_change_requested":
-            mode = event.get("mode")
-            if mode not in MODES:
-                raise StateError("unknown mode: %r" % mode)
-            self.data["pending_mode"] = mode
+            self.data["pending_mode"] = event["mode"]
         return self
 
     def save(self, path):

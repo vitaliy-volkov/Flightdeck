@@ -37,6 +37,14 @@ class CliTest(unittest.TestCase):
             self.assertEqual("valid", json.loads(self.run_cli(project, "validate").stdout)["status"])
             self.assertEqual(1, json.loads(self.run_cli(project, "export").stdout)["schema_version"])
 
+    def test_validate_without_plugin_state_is_noop_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self.assertEqual(0, self.run_cli(project, "init").returncode)
+            result = self.run_cli(project, "validate")
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("not-configured", json.loads(result.stdout)["plugins"]["status"])
+
     def test_dry_run_does_not_change_files_and_corruption_is_preserved(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)

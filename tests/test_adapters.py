@@ -67,6 +67,15 @@ class AdapterContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             render("other", probe("codex"))
 
+    def test_available_and_unavailable_are_disjoint_and_unavailable_never_succeeds(self):
+        for agent in ("codex", "claude-code", "cursor"):
+            capabilities = probe(agent)
+            available = set(capabilities["available_capabilities"])
+            unavailable = set(capabilities["unavailable_capabilities"])
+            self.assertFalse(available & unavailable)
+            for action in unavailable:
+                self.assertFalse(render(action, capabilities)["supported"])
+
 
 if __name__ == "__main__":
     unittest.main()

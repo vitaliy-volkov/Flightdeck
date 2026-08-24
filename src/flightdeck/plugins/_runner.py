@@ -33,7 +33,13 @@ def main():
             raise PermissionError("Flightdeck denied files.read capability")
         if event == "open" and args:
             mode = args[1] if len(args) > 1 else "r"
-            writing = isinstance(mode, str) and any(flag in mode for flag in "wax+")
+            flags = args[2] if len(args) > 2 else mode
+            writing = (
+                isinstance(mode, str) and any(flag in mode for flag in "wax+")
+            ) or (
+                isinstance(flags, int)
+                and bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC))
+            )
             if writing and "files.write" not in granted:
                 raise PermissionError("Flightdeck denied files.write capability")
             if not writing and "files.read" not in granted and not within(args[0], allowed_reads):

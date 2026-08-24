@@ -1,0 +1,11 @@
+{
+  "phases": ["preflight", "manifest", "briefing", "spec", "plan", "build", "review", "acceptance"],
+  "artifacts": {
+    "brief": "Build a traceable demo.\n",
+    "manifest": {"requirements": [{"id": "R01", "status": "in-spec"}], "coverage": {"R01": ["spec", "plan", "review", "acceptance"]}},
+    "spec": "# Spec\n\nR01 is specified.\n",
+    "plan": "# Plan\n\nImplement and verify R01.\n",
+    "review": "# Review\n\nR01 reviewed with no blockers.\n",
+    "acceptance": {"blind": true, "ok": true, "requirements": ["R01"]}
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "codex": {
+    "run_command": [true, "exec_command"], "edit_file": [true, "apply_patch"],
+    "spawn_worker": [true, "spawn_agent"], "open_preview": [true, "open local preview"],
+    "request_approval": [true, "request user approval"], "report_result": [true, "final response"]
+  },
+  "claude-code": {
+    "run_command": [true, "Bash"], "edit_file": [true, "Edit"],
+    "spawn_worker": [true, "Task"], "open_preview": [true, "open local preview"],
+    "request_approval": [true, "AskUserQuestion"], "report_result": [true, "final response"]
+  },
+  "cursor": {
+    "run_command": [true, "terminal command"], "edit_file": [true, "workspace edit"],
+    "spawn_worker": [false, null], "open_preview": [true, "open local preview"],
+    "request_approval": [true, "chat approval request"], "report_result": [true, "chat response"]
+  }
+}

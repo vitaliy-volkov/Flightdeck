@@ -33,6 +33,7 @@ OUTWARD_EVENTS = frozenset({
     "external_write", "deploy", "publish", "message", "delete", "payment",
     "rewrite_history",
 })
+UNBROKERED_CAPABILITIES = frozenset({"network", "shell", "files.write"})
 _NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?$")
 
@@ -221,6 +222,18 @@ class PluginManager:
         signed["integrity_sha256"] = _lock_integrity(signed)
         _atomic_json(self.lock_path, signed)
 
+    def _claim_approval(self, approval_id: str) -> None:
+        claims = self.project / ".flightdeck" / "approval-claims"
+        claims.mkdir(parents=True, exist_ok=True)
+        claim = claims / hashlib.sha256(approval_id.encode("utf-8")).hexdigest()
+        try:
+            descriptor = os.open(str(claim), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError as exc:
+            raise PluginError("fresh actor=user approval required; approval already consumed") from exc
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(approval_id + "\n")
+            stream.flush(); os.fsync(stream.fileno())
+
     def list(self) -> Dict[str, Dict[str, Any]]:
         return dict(self._lock()["plugins"])
 
@@ -327,7 +340,11 @@ class PluginManager:
 
     def doctor(self) -> Dict[str, Any]:
         checks: List[Dict[str, Any]] = []
-        checks.append({"check": "python", "ok": sys.version_info >= (3, 11), "detail": sys.version.split()[0]})
+        supported_python = sys.version_info >= (3, 11)
+        checks.append({
+            "check": "python", "ok": supported_python, "supported": supported_python,
+            "detail": sys.version.split()[0] if supported_python else "%s; Python 3.11+ required for supported use" % sys.version.split()[0],
+        })
         try:
             from flightdeck.adapters import probe
             profile = probe(self.agent)
@@ -373,10 +390,17 @@ class PluginManager:
         if not configured <= set(manifest["capabilities"]) or not configured <= CAPABILITIES:
             raise PluginError("invalid granted permissions in lock")
         granted = sorted(requested.intersection(configured))
+        unbrokered = set(granted).intersection(UNBROKERED_CAPABILITIES)
+        if unbrokered:
+            raise PluginError(
+                "capability requires an unavailable OS-grade broker: %s"
+                % ", ".join(sorted(unbrokered))
+            )
         needs_approval = "external.write" in granted
         approval_id = self._validate_approval(approval, name, hook, lock) if needs_approval else None
         approval_consumed = False
         if approval_id is not None:
+            self._claim_approval(approval_id)
             lock["consumed_approvals"].append(approval_id); self._save(lock)
             approval_consumed = True
         request = {"protocol": PROTOCOL_VERSION, "hook": hook, "run_id": run_id,
@@ -417,6 +441,7 @@ class PluginManager:
         if not response["ok"]:
             raise PluginError("hook failed: %s" % (response["error"] or "no diagnostic"))
         if approval_id is not None and not approval_consumed:
+            self._claim_approval(approval_id)
             lock["consumed_approvals"].append(approval_id); self._save(lock)
         return response
 
