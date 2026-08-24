@@ -30,14 +30,14 @@ class CoreTransitionsTest(unittest.TestCase):
         with self.assertRaises(GateBlocked):
             next_actions(state, {"type": "requirement_removed", "id": "R01", "actor": "agent"})
 
-        approved = next_actions(state, {"type": "requirement_removed", "id": "R01", "actor": "user"})
+        approved = next_actions(state, {"type": "requirement_removed", "id": "R01", "actor": "user"}, trusted=True)
         self.assertEqual("dropped", approved.state["requirements"][0]["status"])
 
     def test_manual_mode_requires_approval_for_spec_and_plan(self):
         state = {"phase": "briefing", "mode": "manual", "gates": {}, "approvals": []}
         with self.assertRaises(GateBlocked):
             next_actions(state, {"type": "gate_passed", "phase": "briefing"})
-        approved = next_actions(state, {"type": "approval_granted", "action": "phase:spec", "actor": "user"})
+        approved = next_actions(state, {"type": "approval_granted", "action": "phase:spec", "actor": "user"}, trusted=True)
         result = next_actions(approved.state, {"type": "gate_passed", "phase": "briefing", "evidence": {"validator": "briefing", "ok": True}})
         self.assertEqual("spec", result.state["phase"])
 
@@ -65,11 +65,38 @@ class CoreTransitionsTest(unittest.TestCase):
         state = {"phase": "build", "mode": "full", "gates": {}}
         with self.assertRaises(GateBlocked):
             next_actions(state, {"type": "approval_granted", "action": "publish", "actor": "agent"})
-        approved = next_actions(state, {"type": "approval_granted", "action": "publish", "actor": "user"})
+        with self.assertRaises(GateBlocked):
+            next_actions(state, {"type": "approval_granted", "action": "publish", "actor": "user"})
+        approved = next_actions(state, {"type": "approval_granted", "action": "publish", "actor": "user"}, trusted=True)
         performed = next_actions(approved.state, {"type": "request_action", "action": "publish"})
         self.assertNotIn("publish", performed.state["approvals"])
         with self.assertRaises(GateBlocked):
             next_actions(performed.state, {"type": "request_action", "action": "publish"})
+
+    def test_all_outward_aliases_share_the_approval_gate(self):
+        aliases = ("payment", "pay", "external.write", "external_write", "external..write", "external\twrite", "deploy", "publish", "message", "delete", "rewrite-history", "rewrite_history", "rewrite--history")
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                state = {"phase":"build", "mode":"full", "gates":{}, "approvals":[]}
+                with self.assertRaises(GateBlocked):
+                    next_actions(state, {"type":"request_action", "action":alias})
+                approved = next_actions(state, {"type":"approval_granted", "actor":"user", "action":alias}, trusted=True)
+                performed = next_actions(approved.state, {"type":"request_action", "action":alias})
+                self.assertFalse(performed.state["approvals"])
+
+        with self.assertRaises(GateBlocked):
+            next_actions({"phase":"build", "mode":"full", "gates":{}, "approvals":[]},
+                         {"type":"request_action", "action":"externalize_write"})
+
+    def test_request_action_uses_an_explicit_safe_allowlist(self):
+        safe = ("run_command", "edit_file", "spawn_worker", "open_preview", "request_approval", "report_result")
+        state = {"phase":"build", "mode":"full", "gates":{}, "approvals":[]}
+        for action in safe:
+            with self.subTest(action=action):
+                self.assertEqual(("perform_%s" % action,), next_actions(state, {"type":"request_action", "action":action}).actions)
+        for action in ("send-email", "charge-card", "remove-data"):
+            with self.subTest(action=action), self.assertRaises(GateBlocked):
+                next_actions(state, {"type":"request_action", "action":action})
 
     def test_pending_mode_takes_effect_only_on_next_phase(self):
         state = {

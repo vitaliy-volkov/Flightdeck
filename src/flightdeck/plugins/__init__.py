@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+from ..core import normalize_action
+
 API_VERSION = "1.0"
 PROTOCOL_VERSION = "1.0"
 MANIFEST_NAME = "flightdeck.plugin.json"
@@ -30,7 +32,7 @@ IMMUTABLE_EVENTS = frozenset({
     "skip_gate", "requirement_removed", "brief_changed", "brief_replaced",
 })
 OUTWARD_EVENTS = frozenset({
-    "external_write", "deploy", "publish", "message", "delete", "payment",
+    "external_write", "deploy", "publish", "message", "delete", "payment", "pay",
     "rewrite_history",
 })
 UNBROKERED_CAPABILITIES = frozenset({"network", "shell", "files.write"})
@@ -485,9 +487,7 @@ def _contains_outward_event_data(value: Any) -> bool:
 
 
 def _normalize_event_name(value: Any) -> Optional[str]:
-    if not isinstance(value, str):
-        return None
-    return re.sub(r"[.\s-]+", "_", value.strip().lower())
+    return normalize_action(value)
 
 
 def dispatch(plugin: Mapping[str, Any], hook: str, payload: Mapping[str, Any], **kwargs: Any) -> Dict[str, Any]:

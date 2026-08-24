@@ -19,7 +19,7 @@ class StateStoreTest(unittest.TestCase):
             store.save(path)
 
             loaded = StateStore.load(path)
-            self.assertEqual(1, loaded.data["schema_version"])
+            self.assertEqual(2, loaded.data["schema_version"])
             self.assertEqual("full", loaded.data["mode"])
             self.assertEqual(
                 ["automatic_decision", "assumption_added"],
@@ -77,6 +77,52 @@ class StateStoreTest(unittest.TestCase):
             self.assertEqual(path.parent, seen["temporary"].parent)
             replaced.assert_called_once_with(str(seen["temporary"]), path)
             self.assertFalse(seen["temporary"].exists())
+
+    def test_valid_legacy_v1_state_migrates_and_round_trips(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".flightdeck" / "state.json"
+            path.parent.mkdir()
+            artifacts = path.parent / "artifacts"
+            artifacts.mkdir()
+            (artifacts / "brief.md").write_text("original brief\n", encoding="utf-8")
+            (artifacts / "brief-additions.md").write_text("addition\n", encoding="utf-8")
+            legacy = StateStore.new().data
+            legacy["schema_version"] = 1
+            legacy.pop("artifact_integrity")
+            path.write_text(json.dumps(legacy), encoding="utf-8")
+            migrated = StateStore.load(path)
+            self.assertEqual(2, migrated.data["schema_version"])
+            self.assertIsNotNone(migrated.data["artifact_integrity"]["brief"])
+            self.assertIsNotNone(migrated.data["artifact_integrity"]["additions"])
+            self.assertIsNone(migrated.data["artifact_integrity"]["acceptance"])
+            migrated.save(path)
+            reloaded = StateStore.load(path)
+            self.assertEqual(migrated.data, reloaded.data)
+
+    def test_legacy_v1_acceptance_without_versioned_provenance_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".flightdeck" / "state.json"
+            artifacts = path.parent / "artifacts"
+            artifacts.mkdir(parents=True)
+            legacy = StateStore.new().data
+            legacy["schema_version"] = 1
+            legacy["phase"] = "acceptance"
+            legacy.pop("artifact_integrity")
+            path.write_text(json.dumps(legacy), encoding="utf-8")
+            (artifacts / "review.md").write_text("review passed\n", encoding="utf-8")
+            (artifacts / "acceptance.json").write_text(
+                json.dumps({"blind": True, "ok": True, "requirements": []}),
+                encoding="utf-8",
+            )
+            before = path.read_bytes()
+
+            with self.assertRaisesRegex(
+                CorruptState,
+                "legacy acceptance lacks trustworthy versioned provenance",
+            ):
+                StateStore.load(path)
+
+            self.assertEqual(before, path.read_bytes())
 
 
 if __name__ == "__main__":

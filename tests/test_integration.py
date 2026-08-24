@@ -11,6 +11,8 @@ ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from flightdeck.adapters import ACTIONS, probe, render
+from flightdeck.core import next_actions
+from flightdeck.state import StateStore
 FIXTURES = ROOT / "tests" / "fixtures"
 
 
@@ -29,9 +31,13 @@ class IntegrationAcceptanceTests(unittest.TestCase):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as td:
                 base = Path(td); project = base / "project"; inputs = base / "inputs"; inputs.mkdir()
                 self.assertEqual(0, self.run_cli(project, "init", "--mode", mode).returncode)
+                acceptance_source = None
                 for kind, value in fixture["artifacts"].items():
                     source = inputs / (kind + (".json" if isinstance(value, dict) else ".md"))
                     source.write_text(json.dumps(value) if isinstance(value, dict) else value, encoding="utf-8")
+                    if kind == "acceptance":
+                        acceptance_source = source
+                        continue
                     stored = self.run_cli(project, "artifact", "--kind", kind, "--input", str(source))
                     self.assertEqual(0, stored.returncode, stored.stderr)
                 observed = []
@@ -40,8 +46,13 @@ class IntegrationAcceptanceTests(unittest.TestCase):
                     observed.append(status["phase"])
                     if mode == "manual" and phase in ("briefing", "spec"):
                         target = "spec" if phase == "briefing" else "plan"
-                        event = json.dumps({"type":"approval_granted", "actor":"user", "action":"phase:" + target})
-                        self.assertEqual(0, self.run_cli(project, "event", "--json", event).returncode)
+                        state_path = project / ".flightdeck" / "state.json"
+                        store = StateStore.load(state_path)
+                        store.data = next_actions(store.data, {"type":"approval_granted", "actor":"user", "action":"phase:" + target}, trusted=True).state
+                        store.save(state_path)
+                    if phase == "acceptance":
+                        stored = self.run_cli(project, "artifact", "--kind", "acceptance", "--input", str(acceptance_source))
+                        self.assertEqual(0, stored.returncode, stored.stderr)
                     advanced = self.run_cli(project, "advance")
                     self.assertEqual(0, advanced.returncode, advanced.stderr)
                 self.assertEqual(fixture["phases"], observed)

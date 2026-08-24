@@ -1,5 +1,6 @@
 """Versioned state and atomic persistence."""
 
+import hashlib
 import json
 import os
 import tempfile
@@ -7,9 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .core import DEPTHS, MODES, PHASES
-
-
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+LEGACY_SCHEMA_VERSION = 1
 
 
 class StateError(ValueError):
@@ -22,6 +22,34 @@ class CorruptState(StateError):
 
 class UnsupportedSchema(StateError):
     pass
+
+
+def _legacy_record(path, source, *, phase=None):
+    record = {
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "provenance": [{"source": source, "phase": phase}],
+    }
+    if phase is not None:
+        record["created_phase"] = phase
+    return record
+
+
+def _migrate_v1(data, state_path):
+    migrated = dict(data)
+    root = Path(state_path).parent / "artifacts"
+    integrity = {"brief": None, "additions": None, "acceptance": None}
+    brief = root / "brief.md"
+    additions = root / "brief-additions.md"
+    acceptance = root / "acceptance.json"
+    if brief.is_file():
+        integrity["brief"] = _legacy_record(brief, "migration:v1")
+    if additions.is_file():
+        integrity["additions"] = _legacy_record(additions, "migration:v1")
+    if acceptance.exists():
+        raise StateError("legacy acceptance lacks trustworthy versioned provenance")
+    migrated["artifact_integrity"] = integrity
+    migrated["schema_version"] = SCHEMA_VERSION
+    return migrated
 
 
 class StateStore:
@@ -44,6 +72,7 @@ class StateStore:
             "assumptions": [],
             "deferred": [],
             "events": [],
+            "artifact_integrity": {"brief": None, "additions": None, "acceptance": None},
         })
         if mode == "full":
             store.apply({
@@ -63,18 +92,25 @@ class StateStore:
             raise CorruptState("%s: %s" % (path, error)) from error
         if not isinstance(data, dict):
             raise CorruptState("%s: state root must be an object" % path)
+        if data.get("schema_version") == LEGACY_SCHEMA_VERSION:
+            try:
+                data = _migrate_v1(data, path)
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
+                raise CorruptState("%s: legacy migration failed: %s" % (path, error)) from error
         if data.get("schema_version") != SCHEMA_VERSION:
             raise UnsupportedSchema(
                 "%s: unsupported schema version %r (expected %s)"
                 % (path, data.get("schema_version"), SCHEMA_VERSION)
             )
         try:
-            return cls(data)
+            store = cls(data)
+            store.verify_artifacts(path)
+            return store
         except StateError as error:
             raise CorruptState("%s: %s" % (path, error)) from error
 
     def validate(self):
-        required = {"schema_version", "phase", "status", "mode", "depth", "events"}
+        required = {"schema_version", "phase", "status", "mode", "depth", "events", "artifact_integrity"}
         missing = sorted(required.difference(self.data))
         if missing:
             raise StateError("missing fields: %s" % ", ".join(missing))
@@ -88,6 +124,31 @@ class StateStore:
             raise StateError("unknown pending mode: %r" % self.data["pending_mode"])
         if self.data["depth"] not in DEPTHS:
             raise StateError("unknown depth: %r" % self.data["depth"])
+        integrity = self.data["artifact_integrity"]
+        if not isinstance(integrity, dict) or set(integrity) != {"brief", "additions", "acceptance"}:
+            raise StateError("artifact_integrity schema is invalid")
+        return True
+
+    def verify_artifacts(self, state_path):
+        root = Path(state_path).parent / "artifacts"
+        integrity = self.data["artifact_integrity"]
+        paths = {"brief": root / "brief.md", "additions": root / "brief-additions.md", "acceptance": root / "acceptance.json"}
+        for kind, path in paths.items():
+            record = integrity[kind]
+            if record is None:
+                if path.exists():
+                    raise StateError("untracked %s artifact detected" % kind)
+                continue
+            if not isinstance(record, dict) or not path.is_file():
+                raise StateError("%s artifact integrity record is invalid" % kind)
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if digest != record.get("sha256"):
+                raise StateError("%s artifact integrity mismatch" % kind)
+            if not isinstance(record.get("provenance"), list) or not record["provenance"]:
+                raise StateError("%s artifact provenance is missing" % kind)
+        acceptance = integrity["acceptance"]
+        if acceptance is not None and acceptance.get("created_phase") != "acceptance":
+            raise StateError("acceptance provenance phase is invalid")
         return True
 
     def apply(self, event):

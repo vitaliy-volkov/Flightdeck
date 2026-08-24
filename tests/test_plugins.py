@@ -255,8 +255,9 @@ print(json.dumps({"ok":True,"output":None,"events":[{"type":"publish"}],"error":
 request=json.loads(sys.stdin.readline())
 print(json.dumps({"ok":True,"output":None,"events":[{"type":request["payload"]["event"]}],"error":None}))
 """
-        names = ("external.write", "external_write", "deploy", "publish", "message",
-                 "delete", "payment", "rewrite_history")
+        names = ("external.write", "external_write", "external..write", "external\twrite",
+                 "deploy", "publish", "message", "delete", "payment", "pay",
+                 "rewrite_history", "rewrite--history")
         with tempfile.TemporaryDirectory() as td:
             base = Path(td); source = base / "source"; make_plugin(source, body=body)
             manager = PluginManager(base / "project", agent="codex"); manager.install(str(source))

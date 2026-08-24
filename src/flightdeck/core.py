@@ -1,13 +1,16 @@
 """Pure phase-transition rules for Flightdeck."""
 
 from dataclasses import dataclass
+import re
 from typing import Any, Dict, Tuple
 
 
 PHASES = ("preflight", "manifest", "briefing", "spec", "plan", "build", "review", "acceptance")
 MODES = ("full", "semi", "interview", "manual")
 DEPTHS = ("strict", "normal", "deep")
-SAFETY_ACTIONS = ("deploy", "publish", "pay", "message", "delete", "rewrite_history", "external_write")
+SAFETY_ACTIONS = ("deploy", "publish", "payment", "message", "delete", "rewrite_history", "external_write")
+SAFE_ACTIONS = ("run_command", "edit_file", "spawn_worker", "open_preview", "request_approval", "report_result")
+ACTION_ALIASES = {"pay": "payment"}
 
 
 class TransitionError(ValueError):
@@ -33,7 +36,14 @@ def _copy_state(state):
     return result
 
 
-def next_actions(state, event):
+def normalize_action(value):
+    if not isinstance(value, str):
+        return value
+    normalized = re.sub(r"[.\s_-]+", "_", value.strip().lower()).strip("_")
+    return ACTION_ALIASES.get(normalized, normalized)
+
+
+def next_actions(state, event, *, trusted=False):
     """Apply one event without mutating state and return requested next work."""
     phase = state.get("phase")
     if phase not in PHASES:
@@ -45,7 +55,9 @@ def next_actions(state, event):
     event_type = event.get("type")
 
     if event_type == "request_action":
-        action = event.get("action")
+        action = normalize_action(event.get("action"))
+        if action not in SAFE_ACTIONS and action not in SAFETY_ACTIONS:
+            raise GateBlocked("action is not in the explicit safe or outward contract: %s" % action)
         if action in SAFETY_ACTIONS and action not in updated["approvals"]:
             raise GateBlocked("action requires explicit approval: %s" % action)
         if action in SAFETY_ACTIONS:
@@ -53,16 +65,16 @@ def next_actions(state, event):
         return TransitionResult(updated, ("perform_%s" % action,))
 
     if event_type == "approval_granted":
-        if event.get("actor") != "user":
-            raise GateBlocked("approval must come from the user")
-        action = event.get("action")
+        if not trusted or event.get("actor") != "user":
+            raise GateBlocked("approval must come from a trusted user boundary")
+        action = normalize_action(event.get("action"))
         if action not in updated["approvals"]:
             updated["approvals"].append(action)
         return TransitionResult(updated, ())
 
     if event_type == "requirement_removed":
-        if event.get("actor") != "user":
-            raise GateBlocked("only the user may remove a requirement")
+        if not trusted or event.get("actor") != "user":
+            raise GateBlocked("only a trusted user boundary may remove a requirement")
         requirement_id = event.get("id")
         for requirement in updated["requirements"]:
             if requirement.get("id") == requirement_id:

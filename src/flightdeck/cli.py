@@ -1,15 +1,24 @@
 """Command-line interface for the Flightdeck runtime."""
 
 import argparse
+import contextlib
+import hashlib
 import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised on non-POSIX Python
+    fcntl = None
 
 from .adapters import probe
 from .core import PHASES, next_actions
 from .plugins import PluginError, PluginManager
+from .reporting import render as render_report
 from .state import CorruptState, StateError, StateStore, UnsupportedSchema
 
 
@@ -51,10 +60,8 @@ def _parser():
     commands.add_parser("validate")
     advance = commands.add_parser("advance")
     advance.add_argument("--evidence", default="cli-artifact-validator")
-    event = commands.add_parser("event")
-    event.add_argument("--json", required=True)
     artifact = commands.add_parser("artifact")
-    artifact.add_argument("--kind", choices=("brief", "manifest", "spec", "plan", "review", "acceptance"), required=True)
+    artifact.add_argument("--kind", choices=("brief", "addition", "manifest", "spec", "plan", "review", "acceptance"), required=True)
     artifact.add_argument("--input", required=True)
     doctor = commands.add_parser("doctor")
     doctor.add_argument("--agent", choices=("codex", "claude-code", "cursor"), default="codex")
@@ -71,7 +78,6 @@ def _parser():
     restore = plugin_commands.add_parser("restore"); restore.add_argument("name"); restore.add_argument("--replace", action="store_true")
     dispatch = plugin_commands.add_parser("dispatch"); dispatch.add_argument("name"); dispatch.add_argument("hook")
     dispatch.add_argument("--payload", default="{}"); dispatch.add_argument("--capability", action="append", default=[])
-    dispatch.add_argument("--approval")
     mode = commands.add_parser("mode")
     mode.add_argument("--set", dest="requested_mode", choices=("full", "semi", "interview", "manual"), required=True)
     export = commands.add_parser("export")
@@ -82,6 +88,7 @@ def _parser():
 _ARTIFACTS = {
     "brief": "brief.md", "manifest": "manifest.json", "spec": "spec.md",
     "plan": "plan.md", "review": "review.md", "acceptance": "acceptance.json",
+    "addition": "brief-additions.md",
 }
 
 
@@ -99,6 +106,54 @@ def _atomic_bytes(path, content):
 
 def _artifact_root(path):
     return path.parent / "artifacts"
+
+
+@contextlib.contextmanager
+def _artifact_lock(path, timeout=30.0):
+    lock_path = path.parent / "artifact.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout
+    descriptor = None
+    exclusive_file = fcntl is None
+    if exclusive_file:
+        while descriptor is None:
+            try:
+                descriptor = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                if time.monotonic() >= deadline:
+                    raise StateError("timed out waiting for artifact lock")
+                time.sleep(0.01)
+    else:
+        descriptor = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    os.close(descriptor)
+                    raise StateError("timed out waiting for artifact lock")
+                time.sleep(0.01)
+    try:
+        os.ftruncate(descriptor, 0)
+        os.write(descriptor, str(os.getpid()).encode("ascii")); os.fsync(descriptor)
+        yield
+    finally:
+        if not exclusive_file:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+        if exclusive_file:
+            try: os.unlink(lock_path)
+            except FileNotFoundError: pass
+
+
+def _artifact_record(content, source, *, phase=None, provenance=None):
+    sources = list(provenance or [])
+    sources.append({"source": str(source.resolve()), "phase": phase})
+    record = {"sha256": hashlib.sha256(content).hexdigest(), "provenance": sources}
+    if phase is not None:
+        record["created_phase"] = phase
+    return record
 
 
 def _read_manifest(root):
@@ -135,8 +190,10 @@ def _validate_artifacts(path, *, complete=False):
             acceptance = json.loads(acceptance_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise StateError("acceptance report is missing or invalid: %s" % error) from error
-        if not isinstance(acceptance, dict) or acceptance.get("blind") is not True or acceptance.get("ok") is not True:
-            raise StateError("acceptance report must record blind=true and ok=true")
+        try:
+            acceptance = json.loads(render_report(acceptance, "acceptance"))
+        except ValueError as error:
+            raise StateError(str(error)) from error
         if set(acceptance.get("requirements", [])) != set(identifiers):
             raise StateError("acceptance report must cover every requirement ID")
         required = {"spec", "plan", "review", "acceptance"}
@@ -173,11 +230,13 @@ def _main(argv=None):
             store.save(path)
         _emit({"status": "dry-run" if arguments.dry_run else "initialized", "path": str(path)})
         return 0
-    try:
-        store = StateStore.load(path)
-    except (CorruptState, UnsupportedSchema, StateError) as error:
-        print(str(error), file=sys.stderr)
-        return 2
+    store = None
+    if arguments.command != "artifact":
+        try:
+            store = StateStore.load(path)
+        except (CorruptState, UnsupportedSchema, StateError) as error:
+            print(str(error), file=sys.stderr)
+            return 2
 
     if arguments.command in ("resume", "status"):
         _emit(_summary(store))
@@ -194,19 +253,32 @@ def _main(argv=None):
         store.data = next_actions(store.data, {"type":"gate_passed", "phase":phase, "evidence":{"validator":phase, "ok":True, "source":arguments.evidence}}).state
         if not arguments.dry_run: store.save(path)
         _emit({"status":"dry-run" if arguments.dry_run else "advanced", **_summary(store)})
-    elif arguments.command == "event":
-        event = json.loads(arguments.json)
-        if event.get("type") in ("approval_granted", "requirement_removed", "request_action"):
-            store.data = next_actions(store.data, event).state
-        else:
-            store.apply(event)
-        if not arguments.dry_run: store.save(path)
-        _emit({"status":"dry-run" if arguments.dry_run else "recorded", "event":event["type"]})
     elif arguments.command == "artifact":
         source = Path(arguments.input)
         content = source.read_bytes()
         target = _artifact_root(path) / _ARTIFACTS[arguments.kind]
-        if not arguments.dry_run: _atomic_bytes(target, content)
+        if arguments.dry_run:
+            StateStore.load(path)
+        else:
+            with _artifact_lock(path):
+                store = StateStore.load(path)
+                integrity = store.data["artifact_integrity"]
+                if arguments.kind == "brief" and (target.exists() or integrity["brief"] is not None):
+                    raise StateError("original brief is immutable; use kind=addition")
+                if arguments.kind == "acceptance":
+                    if store.data["phase"] != "acceptance" or not (_artifact_root(path) / "review.md").is_file():
+                        raise StateError("acceptance may be recorded only after review in acceptance phase")
+                    content = render_report(json.loads(content.decode("utf-8")), "acceptance").encode("utf-8")
+                if arguments.kind == "addition" and target.exists():
+                    content = target.read_bytes() + content
+                _atomic_bytes(target, content)
+                if arguments.kind in ("brief", "addition", "acceptance"):
+                    previous = integrity["additions"] if arguments.kind == "addition" else None
+                    provenance = previous.get("provenance", []) if previous else []
+                    integrity["additions" if arguments.kind == "addition" else arguments.kind] = _artifact_record(
+                        content, source, phase=store.data["phase"] if arguments.kind == "acceptance" else None,
+                        provenance=provenance)
+                    store.save(path)
         _emit({"status":"dry-run" if arguments.dry_run else "stored", "kind":arguments.kind, "path":str(target)})
     elif arguments.command == "doctor":
         adapter = probe(arguments.agent)
@@ -224,8 +296,7 @@ def _main(argv=None):
         elif arguments.plugin_command == "remove": result = manager.remove(arguments.name)
         elif arguments.plugin_command == "restore": result = manager.restore(arguments.name, replace=arguments.replace)
         else:
-            approval = json.loads(arguments.approval) if arguments.approval else None
-            result = manager.dispatch(arguments.name, arguments.hook, json.loads(arguments.payload), requested_capabilities=arguments.capability, approval=approval)
+            result = manager.dispatch(arguments.name, arguments.hook, json.loads(arguments.payload), requested_capabilities=arguments.capability)
         _emit(result)
     elif arguments.command == "mode":
         store.apply({"type": "mode_change_requested", "mode": arguments.requested_mode})
@@ -237,7 +308,7 @@ def _main(argv=None):
             "pending_mode": store.data["pending_mode"],
         })
     elif arguments.command == "export":
-        content = json.dumps(store.data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        content = render_report(store.data, "json")
         if arguments.output:
             output = Path(arguments.output)
             if not arguments.dry_run:
