@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - exercised on non-POSIX Python
 
 from .adapters import probe
 from .core import PHASES, next_actions
+from .dashboard import DashboardError, start as start_dashboard, status as dashboard_status, stop as stop_dashboard
 from .plugins import PluginError, PluginManager
 from .reporting import render as render_report
 from .state import CorruptState, StateError, StateStore, UnsupportedSchema
@@ -57,6 +58,14 @@ def _parser():
     init.add_argument("--polish", action="store_true")
     commands.add_parser("resume")
     commands.add_parser("status")
+    dashboard = commands.add_parser("dashboard")
+    dashboard_commands = dashboard.add_subparsers(dest="dashboard_command", required=True)
+    dashboard_start = dashboard_commands.add_parser("start")
+    dashboard_start.add_argument("--host", default="127.0.0.1")
+    dashboard_start.add_argument("--port", type=int, default=0)
+    dashboard_start.add_argument("--no-open", action="store_true")
+    dashboard_commands.add_parser("status")
+    dashboard_commands.add_parser("stop")
     commands.add_parser("validate")
     advance = commands.add_parser("advance")
     advance.add_argument("--evidence", default="cli-artifact-validator")
@@ -240,6 +249,13 @@ def _main(argv=None):
 
     if arguments.command in ("resume", "status"):
         _emit(_summary(store))
+    elif arguments.command == "dashboard":
+        if arguments.dashboard_command == "start":
+            _emit(start_dashboard(arguments.project, arguments.host, arguments.port, not arguments.no_open))
+        elif arguments.dashboard_command == "status":
+            _emit(dashboard_status(arguments.project))
+        else:
+            _emit(stop_dashboard(arguments.project))
     elif arguments.command == "validate":
         store.validate()
         artifacts = _validate_artifacts(path, complete=store.data["status"] == "complete")
@@ -251,6 +267,7 @@ def _main(argv=None):
         phase = store.data["phase"]
         _phase_evidence(path, phase)
         store.data = next_actions(store.data, {"type":"gate_passed", "phase":phase, "evidence":{"validator":phase, "ok":True, "source":arguments.evidence}}).state
+        store.apply({"type": "phase_advanced", "from_phase": phase, "phase": store.data["phase"], "source": arguments.evidence})
         if not arguments.dry_run: store.save(path)
         _emit({"status":"dry-run" if arguments.dry_run else "advanced", **_summary(store)})
     elif arguments.command == "artifact":
@@ -278,7 +295,8 @@ def _main(argv=None):
                     integrity["additions" if arguments.kind == "addition" else arguments.kind] = _artifact_record(
                         content, source, phase=store.data["phase"] if arguments.kind == "acceptance" else None,
                         provenance=provenance)
-                    store.save(path)
+                store.apply({"type": "artifact_stored", "kind": arguments.kind, "phase": store.data["phase"], "source": str(source.resolve())})
+                store.save(path)
         _emit({"status":"dry-run" if arguments.dry_run else "stored", "kind":arguments.kind, "path":str(target)})
     elif arguments.command == "doctor":
         adapter = probe(arguments.agent)
@@ -323,6 +341,6 @@ def _main(argv=None):
 def main(argv=None):
     try:
         return _main(argv)
-    except (StateError, PluginError, OSError, ValueError, json.JSONDecodeError) as error:
+    except (StateError, PluginError, DashboardError, OSError, ValueError, json.JSONDecodeError) as error:
         print(str(error), file=sys.stderr)
         return 2

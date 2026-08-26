@@ -17,6 +17,7 @@
 - отделяет намерение агента от подтверждения пользователя;
 - проводит финальную приёмку относительно исходного брифа;
 - экспортирует состояние и диагностирует неполную конфигурацию;
+- показывает выполнение в локальном live-дашборде на русском или английском языке;
 - расширяется локальными или Git-плагинами с декларацией разрешений.
 
 ## Как устроен процесс
@@ -85,6 +86,7 @@ python3 skills/flightdeck/scripts/flightdeck.py \
 python3 skills/flightdeck/scripts/flightdeck.py --project . status
 python3 skills/flightdeck/scripts/flightdeck.py --project . resume
 python3 skills/flightdeck/scripts/flightdeck.py --project . validate
+python3 skills/flightdeck/scripts/flightdeck.py --project . dashboard start
 ```
 
 Skill-entrypoint сам добавляет каталог `src/` в import path, поэтому локальный checkout можно запускать без установки пакета.
@@ -95,7 +97,25 @@ Skill-entrypoint сам добавляет каталог `src/` в import path,
 python3 skills/flightdeck/scripts/flightdeck.py --help
 ```
 
-Доступны `init`, `resume`, `status`, `validate`, `advance`, `artifact`, `doctor`, `plugin`, `mode` и `export`. Для безопасной предварительной проверки используйте глобальный флаг `--dry-run`.
+Доступны `init`, `resume`, `status`, `dashboard`, `validate`, `advance`, `artifact`, `doctor`, `plugin`, `mode` и `export`. Для безопасной предварительной проверки используйте глобальный флаг `--dry-run`.
+
+## Live-дашборд
+
+```sh
+# Запустить локальный сервер и автоматически открыть панель
+python3 skills/flightdeck/scripts/flightdeck.py --project . dashboard start
+
+# Запустить без открытия браузера — удобно для Codex preview и CI
+python3 skills/flightdeck/scripts/flightdeck.py --project . dashboard start --no-open
+
+# Проверить или остановить сервер
+python3 skills/flightdeck/scripts/flightdeck.py --project . dashboard status
+python3 skills/flightdeck/scripts/flightdeck.py --project . dashboard stop
+```
+
+Панель привязывается только к `127.0.0.1`, показывает восемь фаз, требования, gates, assumptions и последние события. Обновления приходят через Server-Sent Events без перезагрузки страницы; при проблемах соединения включается резервный опрос. Есть светлая и тёмная темы, русский и английский интерфейс. Выбор сохраняется только локально в браузере.
+
+Сервер read-only: он отдаёт лишь фиксированные маршруты `/`, `/api/health`, `/api/state` и `/events`, не предоставляет доступ к произвольным файлам проекта и не использует внешние библиотеки.
 
 ## Плагины
 
@@ -140,12 +160,12 @@ python3 -m unittest discover -s tests -v
 python3 scripts/quick_validate.py
 ```
 
-Текущий набор содержит 58 тестов: переходы фаз, режимы, сохранение состояния, конкурентные записи, адаптеры, плагины, permissions, approvals, автономную упаковку skill и сквозную приёмку.
+Тесты покрывают переходы фаз, режимы, сохранение состояния, конкурентные записи, live-дашборд, адаптеры, плагины, permissions, approvals, автономную упаковку skill и сквозную приёмку.
 
 ## Структура репозитория
 
 ```text
-src/flightdeck/                 ядро, состояние, CLI, адаптеры и plugins
+src/flightdeck/                 ядро, состояние, CLI, dashboard, адаптеры и plugins
 skills/flightdeck/              SKILL.md, инструкции фаз и entrypoint
 examples/safe-plugin/           минимальный безопасный пример плагина
 tests/                          unit и integration tests
