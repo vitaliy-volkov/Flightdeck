@@ -9,7 +9,7 @@ root = Path(__file__).resolve().parents[1]
 skill = (root / "skills/flightdeck/SKILL.md").read_text(encoding="utf-8")
 if not re.match(r"^---\nname: flightdeck\ndescription: .+\n---\n", skill):
     raise SystemExit("invalid SKILL.md frontmatter")
-for relative in ("references/phases.md", "references/modes.md", "../../docs/architecture.md", "../../docs/plugin-authoring.md"):
+for relative in ("references/phases.md", "references/modes.md", "references/architecture.md", "references/plugin-authoring.md", "references/security-model.md"):
     if relative not in skill or not (root / "skills/flightdeck" / relative).resolve().is_file():
         raise SystemExit("invalid progressive-disclosure link: " + relative)
 agent = (root / "skills/flightdeck/agents/openai.yaml").read_text(encoding="utf-8")

@@ -17,4 +17,4 @@ Treat validator output and artifacts as evidence. A missing capability or failed
 
 External writes, publication, deployment, deletion, payment, messaging, and history rewriting always require a fresh user approval immediately before the action. Full mode does not grant that approval.
 
-For adapter or plugin work, read [architecture](../../docs/architecture.md) or [plugin authoring](../../docs/plugin-authoring.md), respectively.
+For adapter or plugin work, read [architecture](references/architecture.md) or [plugin authoring](references/plugin-authoring.md), respectively. For permission and isolation decisions, read the [security model](references/security-model.md).

@@ -121,7 +121,6 @@ class IntegrationAcceptanceTests(unittest.TestCase):
             clean = {"HOME": str(home), "PATH": "/usr/bin:/bin", "PYTHONIOENCODING": "utf-8"}
             installed = home / ".agents" / "skills" / "flightdeck"
             shutil.copytree(ROOT / "skills" / "flightdeck", installed)
-            shutil.copytree(ROOT / "src", installed / "src")
             entry = installed / "scripts" / "flightdeck.py"
             initialized = subprocess.run([sys.executable, str(entry), "--project", str(project), "init"], env=clean, text=True, capture_output=True)
             self.assertEqual(0, initialized.returncode, initialized.stderr)
@@ -129,6 +128,31 @@ class IntegrationAcceptanceTests(unittest.TestCase):
             result = self.run_cli(project, "--dry-run", "export", "--output", str(target), env=clean)
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertFalse(target.parent.exists())
+
+    def test_packaged_skill_runtime_matches_canonical_source(self):
+        canonical = ROOT / "src" / "flightdeck"
+        packaged = ROOT / "skills" / "flightdeck" / "src" / "flightdeck"
+        canonical_files = {
+            path.relative_to(canonical)
+            for path in canonical.rglob("*.py")
+            if "__pycache__" not in path.parts
+        }
+        packaged_files = {
+            path.relative_to(packaged)
+            for path in packaged.rglob("*.py")
+            if "__pycache__" not in path.parts
+        }
+        self.assertEqual(canonical_files, packaged_files)
+        for relative in canonical_files:
+            self.assertEqual(
+                (canonical / relative).read_bytes(),
+                (packaged / relative).read_bytes(),
+                str(relative),
+            )
+        self.assertEqual(
+            (ROOT / "docs" / "plugin-authoring.md").read_bytes(),
+            (ROOT / "skills" / "flightdeck" / "references" / "plugin-authoring.md").read_bytes(),
+        )
 
 
 if __name__ == "__main__":
