@@ -1,35 +1,178 @@
 # Flightdeck
 
-Flightdeck is an MIT-licensed, offline-first skill and Python 3.11+ CLI for resumable software delivery: brief → manifest → specification → plan → build → review → blind acceptance. It uses only the Python standard library; Node.js, npm, and pip packages are not required.
+**Открытый автопилот для разработки с AI-агентами.** Flightdeck превращает короткий пользовательский бриф в управляемый цикл: фиксирует требования, готовит спецификацию и план, ведёт разработку по этапам, проверяет результат и сохраняет состояние для продолжения после перерыва.
 
-## Быстрый старт (RU)
+Проект распространяется по лицензии MIT, работает локально и не отправляет телеметрию. В основе — `SKILL.md` для AI-агента и детерминированный CLI на Python 3.11+ без обязательных зависимостей из `pip`, Node.js или npm.
+
+> Flightdeck не является «агентом без ограничений». Публикация, деплой, платежи, сообщения, удаление данных и переписывание истории всегда требуют отдельного подтверждения пользователя — даже в полностью автоматическом режиме.
+
+## Зачем нужен Flightdeck
+
+При длинной работе с AI часто теряются исходные требования, повторяются уже принятые решения, а зелёные тесты ошибочно принимаются за готовый продукт. Flightdeck задаёт воспроизводимый процесс и хранит доказательства каждого перехода.
+
+- сохраняет исходный бриф без незаметного переписывания;
+- связывает требования со спецификацией и планом;
+- разбивает работу на проверяемые этапы;
+- умеет продолжать прерванный запуск через `resume`;
+- отделяет намерение агента от подтверждения пользователя;
+- проводит финальную приёмку относительно исходного брифа;
+- экспортирует состояние и диагностирует неполную конфигурацию;
+- расширяется локальными или Git-плагинами с декларацией разрешений.
+
+## Как устроен процесс
+
+```text
+Бриф → Требования → Брифинг → Спецификация → План
+      → Разработка → Код-ревью → Приёмка
+```
+
+Внутренние идентификаторы фаз:
+
+```text
+preflight → manifest → briefing → spec → plan → build → review → acceptance
+```
+
+Состояние хранится в `.flightdeck/state.json`. Переход на следующую фазу возможен только при наличии подходящего успешного evidence от валидатора. Исходный brief неизменяем, дополнения добавляются последовательно, а снять требование может только пользователь.
+
+## Поддерживаемые среды
+
+Flightdeck использует единое ядро и адаптеры возможностей для:
+
+- OpenAI Codex;
+- Claude Code;
+- Cursor.
+
+Если конкретная среда не поддерживает действие, адаптер возвращает понятный blocker или fallback и не изображает успешное выполнение.
+
+## Режимы
+
+| Режим | Поведение |
+|---|---|
+| `full` | Автоматически принимает оставшиеся обратимые технические решения и фиксирует assumptions. |
+| `semi` | Работает автономно, но уточняет действительно важные неизвестные. Режим по умолчанию. |
+| `interview` | Сначала подробно разбирает задачу с пользователем, затем выполняет её автономно. |
+| `manual` | Показывает спецификацию и план для явного согласования перед разработкой. |
+
+Смена режима применяется со следующей фазы:
+
+```sh
+python3 skills/flightdeck/scripts/flightdeck.py --project . mode --set full
+```
+
+## Требования
+
+- Python 3.11 или новее;
+- Git — только для установки из Git-источников и обычной работы с репозиторием;
+- сторонние Python-пакеты не требуются.
+
+Проверить среду:
+
+```sh
+python3 skills/flightdeck/scripts/flightdeck.py --project . doctor --agent codex
+```
+
+Вместо `codex` можно указать `claude-code` или `cursor`.
+
+## Быстрый старт
 
 ```sh
 git clone https://github.com/vitaliy-volkov/Flightdeck.git
 cd Flightdeck
-python3 skills/flightdeck/scripts/flightdeck.py --project . init --mode semi --depth normal
+
+python3 skills/flightdeck/scripts/flightdeck.py \
+  --project . init --mode semi --depth normal
+
 python3 skills/flightdeck/scripts/flightdeck.py --project . status
+python3 skills/flightdeck/scripts/flightdeck.py --project . resume
 python3 skills/flightdeck/scripts/flightdeck.py --project . validate
 ```
 
-Для проверки локального checkout без установки используйте команды выше прямо из корня репозитория; entrypoint сам подключает `src/`. Канонический порядок фаз: `preflight → manifest → briefing → spec → plan → build → review → acceptance`. Быстрая проверка checkout: `python3 scripts/quick_validate.py`.
+Skill-entrypoint сам добавляет каталог `src/` в import path, поэтому локальный checkout можно запускать без установки пакета.
 
-Для продолжения существующего запуска используйте `resume`. Режимы: `full`, `semi`, `interview`, `manual`; команда `python3 skills/flightdeck/scripts/flightdeck.py --project . mode --set full` планирует смену режима со следующей фазы. `full` записывает автоматические решения как assumptions, но не разрешает push, deploy, публикацию и другие внешние или необратимые действия — для них всегда нужно отдельное подтверждение пользователя.
-
-## Quick start (EN)
+Все команды:
 
 ```sh
-git clone https://github.com/vitaliy-volkov/Flightdeck.git
-cd Flightdeck
-python3 skills/flightdeck/scripts/flightdeck.py --project . init --mode semi --depth normal
-python3 skills/flightdeck/scripts/flightdeck.py --project . status
-python3 skills/flightdeck/scripts/flightdeck.py --project . validate
+python3 skills/flightdeck/scripts/flightdeck.py --help
 ```
 
-For an uninstalled local checkout, run those commands directly from the repository root; the entrypoint adds `src/` itself. The canonical phase order is `preflight → manifest → briefing → spec → plan → build → review → acceptance`. Validate a checkout with `python3 scripts/quick_validate.py`.
+Доступны `init`, `resume`, `status`, `validate`, `advance`, `artifact`, `doctor`, `plugin`, `mode` и `export`. Для безопасной предварительной проверки используйте глобальный флаг `--dry-run`.
 
-Use `resume` for an existing run. Modes are `full`, `semi`, `interview`, and `manual`; `python3 skills/flightdeck/scripts/flightdeck.py --project . mode --set full` schedules a mode change for the next phase. Full mode records automatic decisions as assumptions, but never authorizes push, deployment, publication, or another external or irreversible action. Those always require separate user approval.
+## Плагины
 
-See [architecture](docs/architecture.md), [plugin authoring](docs/plugin-authoring.md), [security model](docs/security-model.md), and the [comparison ADR](docs/adr/0001-autopilot-comparison.md). Run tests with `python3 -m unittest discover -s tests -v`.
+Плагин описывается файлом `flightdeck.plugin.json` и может подключать hooks:
 
-Target repository naming is documented for installation only; cloning or creating a repository does not imply permission to push or publish.
+- `before_phase` и `after_phase`;
+- `before_gate` и `after_gate`;
+- `on_blocked`;
+- `report_section`.
+
+Установка локального примера:
+
+```sh
+python3 skills/flightdeck/scripts/flightdeck.py \
+  --project . plugin install examples/safe-plugin
+
+python3 skills/flightdeck/scripts/flightdeck.py --project . plugin list
+```
+
+Также поддерживается установка из Git URL/ref. Центрального marketplace в v1 нет.
+
+Разрешения выдаются по принципу **default deny**. Плагин заранее объявляет необходимые возможности: `network`, `shell`, `files.read`, `files.write`, `memory`, `external.read` или `external.write`. Объявление возможности не является разрешением на действие.
+
+## Безопасность
+
+- Flightdeck не включает телеметрию по умолчанию.
+- Секреты не передаются plugin-процессу из окружения родителя.
+- Неизвестные действия блокируются, а не выполняются «на удачу».
+- Внешнее или необратимое действие требует свежего одноразового подтверждения.
+- Brief, additions и acceptance связаны с SHA-256 и provenance в versioned state.
+- Повреждение или ручная подмена артефактов обнаруживается при загрузке.
+- Отчёты редактируют поля, похожие на токены, пароли и приватные ключи.
+
+Важно: Python audit hooks обеспечивают дополнительную защиту, но не заменяют полноценную sandbox на уровне ОС. Поэтому прямые `network`, `shell` и `files.write` для недоверенных плагинов в v1 закрыты; высокорисковые интеграции должны использовать отдельно проверенный broker или OS sandbox.
+
+Подробности: [модель безопасности](docs/security-model.md) и [ответственное сообщение об уязвимостях](SECURITY.md).
+
+## Проверка проекта
+
+```sh
+python3 -m unittest discover -s tests -v
+python3 scripts/quick_validate.py
+```
+
+Текущий набор содержит 57 тестов: переходы фаз, режимы, сохранение состояния, конкурентные записи, адаптеры, плагины, permissions, approvals и сквозную приёмку.
+
+## Структура репозитория
+
+```text
+src/flightdeck/                 ядро, состояние, CLI, адаптеры и plugins
+skills/flightdeck/              SKILL.md, инструкции фаз и entrypoint
+examples/safe-plugin/           минимальный безопасный пример плагина
+tests/                          unit и integration tests
+docs/                           архитектура, безопасность и создание плагинов
+scripts/quick_validate.py       полная проверка checkout без зависимостей
+```
+
+Полезные документы:
+
+- [архитектура](docs/architecture.md);
+- [создание плагинов](docs/plugin-authoring.md);
+- [модель безопасности](docs/security-model.md);
+- [сравнение с исходным Autopilot](docs/adr/0001-autopilot-comparison.md);
+- [участие в разработке](CONTRIBUTING.md).
+
+## Статус и ограничения v1
+
+- Поддерживается Python 3.11+ и только standard library.
+- Плагины устанавливаются из локальной папки или Git; marketplace отсутствует.
+- Изоляция plugin subprocess — defense in depth, а не граница уровня контейнера.
+- Запись artifact и state состоит из двух атомарных операций. При прерывании Flightdeck обнаруживает несоответствие и останавливается для безопасного восстановления.
+- На системах без POSIX `flock` аварийно оставшийся lock-файл может потребовать ручного удаления после проверки процесса.
+
+## Происхождение проекта
+
+Flightdeck — самостоятельная реализация, созданная с опорой на идеи публичного Autopilot из репозитория [nick-vels/skills](https://github.com/nick-vels/skills). Исходный проект и Flightdeck распространяются по MIT; Flightdeck не заявляет чужой исходный код или тексты как собственные.
+
+## Лицензия
+
+[MIT](LICENSE) © Flightdeck contributors.
