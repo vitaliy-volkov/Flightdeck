@@ -7,6 +7,7 @@ import urllib.request
 from pathlib import Path
 
 from flightdeck.dashboard import DashboardServer, snapshot, start, status, stop
+from flightdeck.control_plane import ControlPlane
 from flightdeck.state import StateStore
 
 
@@ -31,6 +32,10 @@ class DashboardTest(unittest.TestCase):
             self.assertEqual("demo", payload["dashboard"]["project"])
             self.assertEqual(0, payload["dashboard"]["phase_index"])
             self.assertEqual("R01", payload["dashboard"]["requirements"][0]["id"])
+            plane = ControlPlane(project)
+            plane.start("CP-01", "Общий run")
+            plane.join("CP-01", "codex")
+            self.assertEqual("CP-01", snapshot(project)["dashboard"]["control_plane"]["runs"][0]["id"])
             self.assertEqual(payload["dashboard"]["updated_at"], snapshot(project)["dashboard"]["updated_at"])
             state_path = project / ".flightdeck" / "state.json"
             state = StateStore.load(state_path)

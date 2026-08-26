@@ -99,6 +99,29 @@ python3 skills/flightdeck/scripts/flightdeck.py --help
 
 Доступны `init`, `resume`, `status`, `dashboard`, `validate`, `advance`, `artifact`, `doctor`, `plugin`, `mode` и `export`. Для безопасной предварительной проверки используйте глобальный флаг `--dry-run`.
 
+## Кросс-агентный control plane
+
+`control` — это переносимый слой между Codex, Claude Code и Cursor. Он не заменяет их редактор, терминал, планирование или встроенные permissions: Flightdeck хранит только участников общей миссии, handoff, запросы на внешние действия и доказательства.
+
+```sh
+# Создать переносимый run и зарегистрировать участников
+python3 skills/flightdeck/scripts/flightdeck.py --project . control start \
+  --run CP-001 --title "Поставка функции"
+python3 skills/flightdeck/scripts/flightdeck.py --project . control join \
+  --run CP-001 --agent codex --session thread-123
+python3 skills/flightdeck/scripts/flightdeck.py --project . control join \
+  --run CP-001 --agent claude-code --session session-456
+
+# Передать работу и зафиксировать evidence
+python3 skills/flightdeck/scripts/flightdeck.py --project . control handoff \
+  --run CP-001 --from-agent codex --to-agent claude-code \
+  --summary "Контракт реализован" --next-action "Провести review"
+python3 skills/flightdeck/scripts/flightdeck.py --project . control evidence-add \
+  --run CP-001 --kind test --status passed --summary "Тесты пройдены"
+```
+
+`control approval-request` только создаёт переносимую запись `pending` для publish/deploy/message/delete и других внешних действий. Он никогда не выдаёт и не подделывает пользовательское подтверждение.
+
 ## Live-дашборд
 
 ```sh

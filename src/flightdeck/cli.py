@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - exercised on non-POSIX Python
 
 from .adapters import probe
 from .core import PHASES, next_actions
+from .control_plane import AGENTS, ControlPlane, ControlPlaneError
 from .dashboard import DashboardError, start as start_dashboard, status as dashboard_status, stop as stop_dashboard
 from .plugins import PluginError, PluginManager
 from .reporting import render as render_report
@@ -58,6 +59,15 @@ def _parser():
     init.add_argument("--polish", action="store_true")
     commands.add_parser("resume")
     commands.add_parser("status")
+    control = commands.add_parser("control")
+    control_commands = control.add_subparsers(dest="control_command", required=True)
+    control_start = control_commands.add_parser("start"); control_start.add_argument("--run", required=True); control_start.add_argument("--title", required=True)
+    control_join = control_commands.add_parser("join"); control_join.add_argument("--run", required=True); control_join.add_argument("--agent", choices=AGENTS, required=True); control_join.add_argument("--session")
+    control_handoff = control_commands.add_parser("handoff"); control_handoff.add_argument("--run", required=True); control_handoff.add_argument("--from-agent", choices=AGENTS, required=True); control_handoff.add_argument("--to-agent", choices=AGENTS, required=True); control_handoff.add_argument("--summary", required=True); control_handoff.add_argument("--next-action", required=True); control_handoff.add_argument("--risk")
+    control_approval = control_commands.add_parser("approval-request"); control_approval.add_argument("--run", required=True); control_approval.add_argument("--action", required=True); control_approval.add_argument("--summary", required=True); control_approval.add_argument("--evidence-ref")
+    control_evidence = control_commands.add_parser("evidence-add"); control_evidence.add_argument("--run", required=True); control_evidence.add_argument("--kind", required=True); control_evidence.add_argument("--status", required=True); control_evidence.add_argument("--summary", required=True); control_evidence.add_argument("--reference")
+    control_status = control_commands.add_parser("status"); control_status.add_argument("--run")
+    control_export = control_commands.add_parser("export"); control_export.add_argument("--run", required=True); control_export.add_argument("--format", choices=("json", "markdown"), default="json")
     dashboard = commands.add_parser("dashboard")
     dashboard_commands = dashboard.add_subparsers(dest="dashboard_command", required=True)
     dashboard_start = dashboard_commands.add_parser("start")
@@ -118,8 +128,8 @@ def _artifact_root(path):
 
 
 @contextlib.contextmanager
-def _artifact_lock(path, timeout=30.0):
-    lock_path = path.parent / "artifact.lock"
+def _artifact_lock(path, timeout=30.0, lock_name="artifact.lock"):
+    lock_path = path.parent / lock_name
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout
     descriptor = None
@@ -249,6 +259,21 @@ def _main(argv=None):
 
     if arguments.command in ("resume", "status"):
         _emit(_summary(store))
+    elif arguments.command == "control":
+        if arguments.dry_run and arguments.control_command in ("start", "join", "handoff", "approval-request", "evidence-add"):
+            _emit({"status": "dry-run", "command": arguments.control_command, "run": arguments.run})
+            return 0
+        with _artifact_lock(path, lock_name="control-plane.lock"):
+            control = ControlPlane.load(arguments.project)
+            if arguments.control_command == "start": result = control.start(arguments.run, arguments.title)
+            elif arguments.control_command == "join": result = control.join(arguments.run, arguments.agent, arguments.session)
+            elif arguments.control_command == "handoff": result = control.handoff(arguments.run, arguments.from_agent, arguments.to_agent, arguments.summary, arguments.next_action, arguments.risk)
+            elif arguments.control_command == "approval-request": result = control.request_approval(arguments.run, arguments.action, arguments.summary, arguments.evidence_ref)
+            elif arguments.control_command == "evidence-add": result = control.add_evidence(arguments.run, arguments.kind, arguments.status, arguments.summary, arguments.reference)
+            elif arguments.control_command == "status": result = control.summary(arguments.run)
+            else:
+                print(control.export(arguments.run, arguments.format), end=""); return 0
+        _emit(result)
     elif arguments.command == "dashboard":
         if arguments.dashboard_command == "start":
             _emit(start_dashboard(arguments.project, arguments.host, arguments.port, not arguments.no_open))
@@ -341,6 +366,6 @@ def _main(argv=None):
 def main(argv=None):
     try:
         return _main(argv)
-    except (StateError, PluginError, DashboardError, OSError, ValueError, json.JSONDecodeError) as error:
+    except (StateError, PluginError, DashboardError, ControlPlaneError, OSError, ValueError, json.JSONDecodeError) as error:
         print(str(error), file=sys.stderr)
         return 2

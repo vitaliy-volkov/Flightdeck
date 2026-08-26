@@ -2,6 +2,10 @@
   const badge=document.querySelector('.live');
   const stamp=document.createElement('small');
   stamp.id='lastUpdate'; stamp.textContent='—'; badge.append(stamp);
+  const control=document.createElement('div');
+  control.className='telemetry-row'; control.id='controlPlane';
+  control.innerHTML='<label>CONTROL PLANE</label><strong>—</strong><p>—</p>';
+  document.querySelector('.telemetry').append(control);
   const systemText={
     'Remaining decisions run automatically in full mode':'Оставшиеся решения принимаются автоматически в полном режиме',
     'Recorded':'Зафиксировано'
@@ -12,6 +16,10 @@
   window.render=function enhancedRender(data){
     originalRender(data);
     const currentLanguage=document.documentElement.lang;
+    const runs=(data.dashboard&&data.dashboard.control_plane&&data.dashboard.control_plane.runs)||[];
+    const latest=runs[runs.length-1];
+    if(latest){const t=latest.telemetry;control.querySelector('strong').textContent=latest.title;control.querySelector('p').textContent=(currentLanguage==='ru'?'Агенты: ':'Agents: ')+t.participants+' · '+(currentLanguage==='ru'?'handoff: ':'handoffs: ')+t.handoffs+' · '+(currentLanguage==='ru'?'ожидают подтверждения: ':'pending approvals: ')+t.pending_approvals}
+    else{control.querySelector('strong').textContent=currentLanguage==='ru'?'Нет кросс-агентных запусков':'No cross-agent runs';control.querySelector('p').textContent='—'}
     if(currentLanguage==='ru'){
       const mode=document.getElementById('mode'),status=document.getElementById('status');
       mode.textContent=(statusText[String(data.mode)]||data.mode).toUpperCase();

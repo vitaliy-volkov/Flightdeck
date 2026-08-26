@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .core import PHASES
+from .control_plane import ControlPlane
 from .reporting import render as render_report
 from .state import StateStore
 
@@ -65,6 +66,10 @@ def snapshot(project):
     except (OSError, UnicodeError, json.JSONDecodeError):
         state["dashboard"]["requirements"] = []
         state["dashboard"]["coverage"] = {}
+    try:
+        state["dashboard"]["control_plane"] = ControlPlane.load(project).summary()
+    except (OSError, ValueError):
+        state["dashboard"]["control_plane"] = {"runs": []}
     return state
 
 

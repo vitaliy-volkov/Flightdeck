@@ -46,6 +46,41 @@ class CliTest(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertEqual("not-configured", json.loads(result.stdout)["plugins"]["status"])
 
+    def test_control_plane_cli_persists_a_cross_agent_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self.assertEqual(0, self.run_cli(project, "init").returncode)
+            self.assertEqual(0, self.run_cli(project, "control", "start", "--run", "CP-01", "--title", "Передача между агентами").returncode)
+            self.assertEqual(0, self.run_cli(project, "control", "join", "--run", "CP-01", "--agent", "codex").returncode)
+            self.assertEqual(0, self.run_cli(project, "control", "join", "--run", "CP-01", "--agent", "claude-code").returncode)
+            handoff = self.run_cli(project, "control", "handoff", "--run", "CP-01", "--from-agent", "codex", "--to-agent", "claude-code", "--summary", "Состояние сохранено", "--next-action", "Продолжить review")
+            self.assertEqual(0, handoff.returncode, handoff.stderr)
+            status = json.loads(self.run_cli(project, "control", "status", "--run", "CP-01").stdout)
+            self.assertEqual(1, status["runs"][0]["telemetry"]["handoffs"])
+
+    def test_control_plane_serializes_concurrent_agent_joins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self.assertEqual(0, self.run_cli(project, "init").returncode)
+            self.assertEqual(0, self.run_cli(project, "control", "start", "--run", "CP-01", "--title", "Общий run").returncode)
+            commands = (("codex", "thread-a"), ("cursor", "thread-b"))
+            results = []
+            threads = [threading.Thread(target=lambda agent=agent, session=session: results.append(self.run_cli(project, "control", "join", "--run", "CP-01", "--agent", agent, "--session", session))) for agent, session in commands]
+            for thread in threads: thread.start()
+            for thread in threads: thread.join()
+            self.assertTrue(all(result.returncode == 0 for result in results))
+            status = json.loads(self.run_cli(project, "control", "status", "--run", "CP-01").stdout)
+            self.assertEqual(2, status["runs"][0]["telemetry"]["participants"])
+
+    def test_control_plane_dry_run_does_not_create_ledger(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self.assertEqual(0, self.run_cli(project, "init").returncode)
+            result = self.run_cli(project, "--dry-run", "control", "start", "--run", "CP-01", "--title", "Не сохранять")
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("dry-run", json.loads(result.stdout)["status"])
+            self.assertFalse((project / ".flightdeck" / "control-plane.json").exists())
+
     def test_dry_run_does_not_change_files_and_corruption_is_preserved(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)

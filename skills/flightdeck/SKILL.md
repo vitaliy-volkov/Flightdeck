@@ -21,3 +21,5 @@ Write generated manifests, specifications, plans, reviews, acceptance reports, a
 External writes, publication, deployment, deletion, payment, messaging, and history rewriting always require a fresh user approval immediately before the action. Full mode does not grant that approval.
 
 For adapter or plugin work, read [architecture](references/architecture.md) or [plugin authoring](references/plugin-authoring.md), respectively. For permission and isolation decisions, read the [security model](references/security-model.md).
+
+When a task crosses agents, use `control start`, `control join`, `control handoff`, `control evidence-add`, and `control approval-request`. The control plane records portable evidence; it must not recreate native editing, terminal, chat, planning, or permission features of the active agent.
