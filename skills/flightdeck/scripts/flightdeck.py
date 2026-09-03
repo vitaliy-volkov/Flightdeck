@@ -1,18 +1,32 @@
 #!/usr/bin/env python3
 """Repository-local entry point for the Flightdeck standard-library CLI."""
 
+import os
 import sys
 from pathlib import Path
 
 
 SCRIPT = Path(__file__).resolve()
-SOURCE_ROOTS = (SCRIPT.parents[3] / "src", SCRIPT.parents[1] / "src")
-for source_root in SOURCE_ROOTS:
+
+
+def _source_roots():
+    roots = []
+    configured = os.environ.get("FLIGHTDECK_SRC")
+    if configured:
+        roots.append(Path(configured))
+    for parent in SCRIPT.parents:
+        roots.append(parent / "src")
+    return roots
+
+
+for source_root in _source_roots():
     if (source_root / "flightdeck").is_dir():
         sys.path.insert(0, str(source_root))
         break
 else:
-    raise SystemExit("Flightdeck runtime not found; install src/ beside the skill or run from a checkout")
+    raise SystemExit(
+        "Flightdeck runtime not found; keep src/ in the checkout or package the skill with scripts/package_skill.py"
+    )
 
 from flightdeck.cli import main  # noqa: E402
 
