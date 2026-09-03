@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .core import SAFETY_ACTIONS
+from .core import SAFETY_ACTIONS, normalize_action
 from .reporting import render as render_report
 
 
@@ -108,6 +108,7 @@ class ControlPlane:
         run["handoffs"].append(record); self.save(); return record
 
     def request_approval(self, run_id, action, summary, evidence_ref=None):
+        action = normalize_action(action)
         if action not in SAFETY_ACTIONS:
             raise ControlPlaneError("approval action is not an outward Flightdeck action: %s" % action)
         if not summary:
@@ -115,6 +116,25 @@ class ControlPlane:
         run = self._run(run_id)
         record = {"id": "APR-%03d" % (len(run["approvals"]) + 1), "action": action, "summary": summary, "evidence_ref": evidence_ref or None, "status": "pending", "requested_at": _now()}
         run["approvals"].append(record); self.save(); return record
+
+    def grant_approval(self, run_id, *, approval_id=None, action=None):
+        run = self._run(run_id)
+        action = normalize_action(action) if action else None
+        pending = [item for item in run["approvals"] if item.get("status") == "pending"]
+        if approval_id:
+            matches = [item for item in pending if item.get("id") == approval_id]
+        elif action:
+            matches = [item for item in pending if item.get("action") == action]
+        else:
+            raise ControlPlaneError("approval id or action is required")
+        if len(matches) != 1:
+            raise ControlPlaneError("approval is not uniquely pending")
+        record = matches[0]
+        record["status"] = "granted"
+        record["granted_at"] = _now()
+        record["granted_by"] = "user"
+        self.save()
+        return record
 
     def add_evidence(self, run_id, kind, status, summary, reference=None):
         if kind not in EVIDENCE_KINDS or status not in EVIDENCE_STATUSES or not summary:
