@@ -1,8 +1,0 @@
-.live{display:grid!important;grid-template-columns:8px auto;gap:2px 8px!important;padding:8px 11px!important}
-.live .pulse{grid-row:1/3}.live small{color:var(--muted);font-size:8px;white-space:nowrap}
-.live.live-changed{animation:live-flash .8s ease}.live.live-changed .pulse{animation:live-pulse .8s ease}
-.metrics.state-changed{animation:state-flash .8s ease}
-@keyframes live-flash{50%{border-color:var(--green);background:color-mix(in srgb,var(--green) 12%,transparent)}}
-@keyframes live-pulse{50%{transform:scale(1.9);background:var(--green);box-shadow:0 0 18px var(--green)}}
-@keyframes state-flash{50%{box-shadow:0 0 0 2px color-mix(in srgb,var(--green) 55%,transparent),var(--shadow)}}
-@media(max-width:680px){.live{display:grid!important}.actions{width:100%}.live small{font-size:7px}}
